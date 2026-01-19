@@ -1,4 +1,4 @@
-```python
+
 # app.py
 # Streamlit app: National Bank Financial (NBFWM) advisor directory extractor (with Province)
 # Run: streamlit run app.py
@@ -559,4 +559,4 @@ with st.expander("Notes / troubleshooting"):
         "- If you see errors/timeouts, increase the polite delay.\n"
         "- Province comes from the address snippet (or JSON-LD if present). If a page has no address hint, province may be blank."
     )
-```
+
