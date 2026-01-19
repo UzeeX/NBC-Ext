@@ -1,19 +1,3 @@
-That happens because on a lot of NBFWM pages the **province isn’t showing up as “QC/ON/etc” in a spot we reliably captured**, so `address_hint` ends up blank → `province` stays blank.
-
-Best fix: **read the City/Province directly from the main directory page (`/advisor.html`) and use it as a fallback** for each advisor profile URL. That directory page clearly contains lines like **“Montreal, Quebec”**, **“Vancouver, British-Columbia”**, etc., so province becomes rock-solid.
-
-Here’s a **final updated `app.py`** that:
-
-* builds a `profile_url -> city/province` lookup from the directory page
-* parses each profile page for email/phone as before
-* sets `province` from:
-
-  1. profile address/link, else
-  2. the directory lookup
-
-> Replace your current `app.py` with this one and redeploy/reboot your Streamlit app.
-
-```python
 # app.py
 # NBFWM Advisor Directory Extractor (adds Province reliably via directory fallback)
 # Run: streamlit run app.py
@@ -663,6 +647,3 @@ with st.expander("Notes / troubleshooting"):
         "- If missing there, it falls back to the location shown on /advisor.html (City, Province).\n"
         "- If you redeployed and still see blanks, reboot the app and clear cache on Streamlit Cloud."
     )
-```
-
-If you want, paste 2–3 example profile URLs where you’re seeing blanks and I’ll tighten the parser even more — but this directory-fallback approach usually fixes it across the board.
