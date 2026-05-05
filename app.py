@@ -61,8 +61,14 @@ st.caption("Exports publicly listed NBFWM advisor info across Canada by province
 # ----------------------------- Constants / Regex -----------------------------
 
 DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; InovestorDirectoryExtractor/1.3; +https://inovestor.com)",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-CA,en;q=0.9,fr-CA;q=0.8,fr;q=0.7",
+    "Connection": "keep-alive",
 }
 
 BASE_DEFAULT = "https://www.nbfwm.ca"
@@ -75,10 +81,8 @@ ADVISOR_HREF_RE = re.compile(r"^/advisor/.+/(our-team|notre-equipe)/.+\.html$", 
 EMAIL_RE = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.I)
 PHONE_RE = re.compile(r"\b(?:1[-\s]?)?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}\b")
 
-# Canadian provinces/territories abbreviations
 PROV_ABBR_RE = re.compile(r"\b(BC|AB|SK|MB|ON|QC|NB|NS|PE|NL|NT|NU|YT)\b", re.I)
 
-# Full names map, including French and hyphenated forms
 FULL_PROV_MAP = {
     "quebec": "QC", "québec": "QC",
     "ontario": "ON",
@@ -126,7 +130,6 @@ PROVINCE_OPTIONS = {
     "Yukon": "YT",
 }
 
-# City, ProvinceName lines from /advisor.html
 PROV_NAME_PATTERN = (
     r"(Alberta|British[- ]Columbia|Manitoba|New[- ]Brunswick|Nova[- ]Scotia|Ontario|Quebec|Québec|Saskatchewan|"
     r"Prince Edward Island|Newfoundland(?: and Labrador)?|Northwest Territories|Nunavut|Yukon)"
@@ -134,23 +137,30 @@ PROV_NAME_PATTERN = (
 
 CITY_PROV_LINE_RE = re.compile(rf"^\s*([^,\n]+?)\s*,\s*{PROV_NAME_PATTERN}\s*$", re.I)
 
-POSTAL_RE = re.compile(r"\b[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z]\s?\d[ABCEGHJ-NPRSTV-Z]\d\b", re.I)
+POSTAL_RE = re.compile(
+    r"\b[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z]\s?\d[ABCEGHJ-NPRSTV-Z]\d\b",
+    re.I,
+)
 
 
 # ----------------------------- Helpers -----------------------------
 
 def normalize_phone(p: str) -> str:
     digits = re.sub(r"\D+", "", p or "")
+
     if len(digits) == 11 and digits.startswith("1"):
         digits = digits[1:]
+
     if len(digits) == 10:
         return f"{digits[0:3]}-{digits[3:6]}-{digits[6:10]}"
+
     return (p or "").strip()
 
 
 def extract_team_name_from_slug(team_slug: str) -> str:
     if not team_slug:
         return ""
+
     return team_slug.replace("-", " ").strip().title()
 
 
@@ -160,6 +170,7 @@ def extract_province(text: str) -> str:
         return ""
 
     m = PROV_ABBR_RE.search(text)
+
     if m:
         return m.group(1).upper()
 
@@ -175,11 +186,17 @@ def extract_province(text: str) -> str:
 
 
 def safe_get(session: requests.Session, url: str, delay_s: float, timeout: int = 30) -> str:
-    r = session.get(url, headers=DEFAULT_HEADERS, timeout=timeout)
-    r.raise_for_status()
+    r = session.get(
+        url,
+        headers=DEFAULT_HEADERS,
+        timeout=timeout,
+        allow_redirects=True,
+    )
 
     if delay_s and delay_s > 0:
         time.sleep(delay_s)
+
+    r.raise_for_status()
 
     return r.text
 
@@ -199,7 +216,11 @@ def extract_advisor_urls_from_html(html: str, base: str) -> list[str]:
             links.add(urljoin(base, href))
 
     # fallback regex scan
-    for m in re.finditer(r'"/advisor/[^"]+/(?:our-team|notre-equipe)/[^"]+\.html"', html, flags=re.I):
+    for m in re.finditer(
+        r'"/advisor/[^"]+/(?:our-team|notre-equipe)/[^"]+\.html"',
+        html,
+        flags=re.I,
+    ):
         href = m.group(0).strip('"')
         links.add(urljoin(base, href))
 
@@ -384,14 +405,12 @@ def parse_advisor_page(html: str, url: str, base: str, dir_lookup: dict) -> dict
     province = extract_province(address_hint)
 
     # Directory fallback
+    fallback = dir_lookup.get(url, {})
+
     if not province:
-        fallback = dir_lookup.get(url, {})
         province = fallback.get("province", "")
 
-    city = ""
-
-    if dir_lookup.get(url):
-        city = dir_lookup[url].get("city", "")
+    city = fallback.get("city", "")
 
     # Team slug
     team_name = ""
@@ -515,11 +534,12 @@ with c2:
 
     city_contains = st.text_input(
         "City filter optional",
-        placeholder="e.g., Montreal, Toronto, Vancouver, Calgary",
+        placeholder="e.g., Winnipeg, Toronto, Montreal, Vancouver",
     )
 
 with c3:
-    polite_delay = st.slider("Polite delay seconds", 0.0, 1.5, 0.25, 0.05)
+    polite_delay = st.slider("Polite delay seconds", 0.0, 2.5, 0.75, 0.05)
+
     max_profiles = st.number_input(
         "Max profiles 0 = no limit",
         min_value=0,
@@ -532,7 +552,7 @@ with c4:
     deep_crawl = st.toggle(
         "Deep crawl advisor pages",
         value=False,
-        help="Usually not needed. /advisor.html already contains the full list.",
+        help="Usually not needed. Keep this OFF unless the seed page misses links.",
     )
 
     crawl_page_limit = st.number_input(
@@ -556,7 +576,7 @@ run = st.button("Run Extraction", use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="small-muted">Province is extracted from advisor pages first, then filled from the main directory when possible.</div>',
+    '<div class="small-muted">Tip: Keep Deep Crawl OFF. The app filters province/city from the main directory first, then fetches only the matching profile pages.</div>',
     unsafe_allow_html=True,
 )
 
@@ -575,13 +595,15 @@ session = requests.Session()
 status = st.empty()
 progress = st.progress(0)
 
-metrics = st.columns(4)
-metrics[0].metric("Profile links", "0")
-metrics[1].metric("Processed", "0")
-metrics[2].metric("Kept", "0")
-metrics[3].metric("Errors", "0")
+metrics = st.columns(5)
+metrics[0].metric("Found links", "0")
+metrics[1].metric("After filters", "0")
+metrics[2].metric("Processed", "0")
+metrics[3].metric("Kept", "0")
+metrics[4].metric("Errors", "0")
 
 errors = 0
+error_samples = []
 
 # Load seed directory page
 try:
@@ -615,8 +637,15 @@ if deep_crawl:
 
         try:
             html = safe_get(session, page, delay_s=polite_delay)
-        except Exception:
+        except Exception as e:
             errors += 1
+
+            if len(error_samples) < 10:
+                error_samples.append({
+                    "url": page,
+                    "error": str(e),
+                })
+
             continue
 
         advisor_urls.update(extract_advisor_urls_from_html(html, base_url))
@@ -628,15 +657,51 @@ if deep_crawl:
         internal_pages_checked += 1
 
 advisor_urls = sorted(advisor_urls)
-metrics[0].metric("Profile links", f"{len(advisor_urls)}")
+metrics[0].metric("Found links", f"{len(advisor_urls)}")
 
 if not advisor_urls:
     st.warning("No advisor profile links found.")
     st.stop()
 
-# Apply max profiles limit
+
+# ----------------------------- Important Fix -----------------------------
+# Pre-filter profile URLs using the directory lookup BEFORE fetching pages.
+# This prevents fetching hundreds of profile pages unnecessarily.
+
+prefiltered_urls = []
+
+for url in advisor_urls:
+    loc = dir_lookup.get(url, {})
+    loc_province = loc.get("province", "")
+    loc_city = loc.get("city", "")
+
+    # Province filter from directory page
+    if selected_province and loc_province != selected_province:
+        continue
+
+    # City filter from directory page
+    if city_contains.strip():
+        target = city_contains.strip().lower()
+        hay = loc_city.lower()
+
+        if target not in hay:
+            continue
+
+    prefiltered_urls.append(url)
+
+advisor_urls = prefiltered_urls
+metrics[1].metric("After filters", f"{len(advisor_urls)}")
+
+if not advisor_urls:
+    st.warning("No advisor links matched your province/city filters from the directory page.")
+    st.stop()
+
+# Apply max profiles limit after province/city pre-filter
 if max_profiles and int(max_profiles) > 0:
     advisor_urls = advisor_urls[: int(max_profiles)]
+
+
+# ----------------------------- Fetch Matching Profiles -----------------------------
 
 total = len(advisor_urls)
 rows = []
@@ -650,11 +715,10 @@ for i, url in enumerate(advisor_urls, start=1):
         html = safe_get(session, url, delay_s=polite_delay)
         row = parse_advisor_page(html, url=url, base=base_url, dir_lookup=dir_lookup)
 
-        # Province / territory filter
+        # Safety filter after parsing
         if selected_province and row.get("province", "") != selected_province:
             continue
 
-        # City filter
         if city_contains.strip():
             target = city_contains.strip().lower()
             hay = f"{row.get('city', '')} {row.get('address_hint', '')}".lower()
@@ -674,19 +738,29 @@ for i, url in enumerate(advisor_urls, start=1):
                 "profile_url": row.get("profile_url"),
             })
 
-    except Exception:
+    except Exception as e:
         errors += 1
+
+        if len(error_samples) < 10:
+            error_samples.append({
+                "url": url,
+                "error": str(e),
+            })
 
     progress.progress(int((i / total) * 100))
 
-    metrics[1].metric("Processed", f"{i}")
-    metrics[2].metric("Kept", f"{kept}")
-    metrics[3].metric("Errors", f"{errors}")
+    metrics[2].metric("Processed", f"{i}")
+    metrics[3].metric("Kept", f"{kept}")
+    metrics[4].metric("Errors", f"{errors}")
 
 status.success("Extraction complete.")
 
+if error_samples:
+    st.subheader("Error samples")
+    st.dataframe(pd.DataFrame(error_samples), use_container_width=True)
+
 if not rows:
-    st.warning("No advisors matched your filters.")
+    st.warning("No advisors matched your filters, or all matching profile pages failed to load.")
     st.stop()
 
 df = pd.DataFrame(rows)
@@ -742,17 +816,17 @@ if do_excel and OPENPYXL_OK:
     except Exception as e:
         st.warning(f"Excel export failed: {e}")
 
-# Quick sanity stats
 blank_prov = int((df_out["province"].fillna("") == "").sum()) if "province" in df_out.columns else 0
 
 st.caption(f"Province blanks: {blank_prov} / {len(df_out)}")
 
 with st.expander("Notes / troubleshooting"):
     st.write(
-        "- Choose **All Canada** to export everyone.\n"
-        "- Choose a province or territory to filter by location.\n"
-        "- Use the city filter for cities like Toronto, Montreal, Vancouver, Calgary, Winnipeg, Halifax, etc.\n"
-        "- Province is extracted from the advisor page address when available.\n"
-        "- If missing there, it falls back to the location shown on /advisor.html.\n"
+        "- Keep **Deep Crawl OFF** unless you are missing advisor links.\n"
+        "- The app now filters province/city from `/advisor.html` before opening profile pages.\n"
+        "- This avoids trying to fetch all 800+ advisor profiles when you only want one city or province.\n"
+        "- If you still see many errors, check the **Error samples** table.\n"
+        "- If errors say 403, the site is blocking automated requests.\n"
+        "- If errors say timeout, increase the polite delay.\n"
         "- If you redeployed and still see old filters, reboot the app and clear cache on Streamlit Cloud."
     )
