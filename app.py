@@ -1,6 +1,6 @@
 # app.py
 # NBFWM Advisor Directory Extractor
-# Canada-wide province + city filtering
+# Canada-wide province + multi-city filtering
 # Run: streamlit run app.py
 #
 # requirements.txt:
@@ -183,6 +183,33 @@ def extract_province(text: str) -> str:
             return v
 
     return ""
+
+
+def parse_city_filter(city_filter_text: str) -> list[str]:
+    """
+    Turns:
+    Winnipeg, Brandon, Steinbach
+    into:
+    ["winnipeg", "brandon", "steinbach"]
+    """
+    return [
+        c.strip().lower()
+        for c in city_filter_text.split(",")
+        if c.strip()
+    ]
+
+
+def city_matches(haystack: str, selected_cities: list[str]) -> bool:
+    """
+    If no city is selected, everything matches.
+    If cities are selected, returns True if any city appears in the location text.
+    """
+    if not selected_cities:
+        return True
+
+    hay = (haystack or "").lower()
+
+    return any(city in hay for city in selected_cities)
 
 
 def safe_get(session: requests.Session, url: str, delay_s: float, timeout: int = 30) -> str:
@@ -397,9 +424,8 @@ def parse_advisor_page(html: str, url: str, base: str, dir_lookup: dict) -> dict
         all_text = soup.get_text("\n", strip=True)
         phones = [normalize_phone(p) for p in PHONE_RE.findall(all_text)]
 
-    # IMPORTANT FIX:
-    # Do not use pd.unique() here.
-    # This removes blanks and duplicates while keeping original order.
+    # Fixed: avoid pd.unique() here.
+    # Remove blanks and duplicates while keeping original order.
     phones = list(dict.fromkeys([p for p in phones if p]))
     phone = " | ".join(phones[:3])
 
@@ -535,10 +561,13 @@ with c2:
 
     selected_province = PROVINCE_OPTIONS[selected_province_label]
 
-    city_contains = st.text_input(
+    city_filter_text = st.text_input(
         "City filter optional",
-        placeholder="e.g., Winnipeg, Toronto, Montreal, Vancouver",
+        placeholder="e.g., Winnipeg, Brandon, Toronto, Montreal",
+        help="You can enter multiple cities separated by commas.",
     )
+
+    selected_cities = parse_city_filter(city_filter_text)
 
 with c3:
     polite_delay = st.slider("Polite delay seconds", 0.0, 2.5, 0.75, 0.05)
@@ -579,7 +608,7 @@ run = st.button("Run Extraction", use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="small-muted">Tip: Keep Deep Crawl OFF. The app filters province/city from the main directory first, then fetches only the matching profile pages.</div>',
+    '<div class="small-muted">Tip: Enter multiple cities separated by commas. Example: Winnipeg, Brandon, Steinbach.</div>',
     unsafe_allow_html=True,
 )
 
@@ -682,13 +711,9 @@ for url in advisor_urls:
     if selected_province and loc_province != selected_province:
         continue
 
-    # City filter from directory page
-    if city_contains.strip():
-        target = city_contains.strip().lower()
-        hay = loc_city.lower()
-
-        if target not in hay:
-            continue
+    # Multi-city filter from directory page
+    if not city_matches(loc_city, selected_cities):
+        continue
 
     prefiltered_urls.append(url)
 
@@ -718,16 +743,15 @@ for i, url in enumerate(advisor_urls, start=1):
         html = safe_get(session, url, delay_s=polite_delay)
         row = parse_advisor_page(html, url=url, base=base_url, dir_lookup=dir_lookup)
 
-        # Safety filter after parsing
+        # Safety province filter after parsing
         if selected_province and row.get("province", "") != selected_province:
             continue
 
-        if city_contains.strip():
-            target = city_contains.strip().lower()
-            hay = f"{row.get('city', '')} {row.get('address_hint', '')}".lower()
+        # Safety multi-city filter after parsing
+        city_haystack = f"{row.get('city', '')} {row.get('address_hint', '')}"
 
-            if target not in hay:
-                continue
+        if not city_matches(city_haystack, selected_cities):
+            continue
 
         rows.append(row)
         kept += 1
@@ -826,8 +850,10 @@ st.caption(f"Province blanks: {blank_prov} / {len(df_out)}")
 with st.expander("Notes / troubleshooting"):
     st.write(
         "- Keep **Deep Crawl OFF** unless you are missing advisor links.\n"
+        "- You can enter multiple cities separated by commas.\n"
+        "- Example: Winnipeg, Brandon, Steinbach.\n"
         "- The app filters province/city from `/advisor.html` before opening profile pages.\n"
-        "- This avoids trying to fetch all 800+ advisor profiles when you only want one city or province.\n"
+        "- This avoids trying to fetch all 800+ advisor profiles when you only want a few cities.\n"
         "- The previous phone parsing crash has been fixed by removing `pd.unique()` from the phone section.\n"
         "- If you still see many errors, check the **Error samples** table.\n"
         "- If errors say 403, the site is blocking automated requests.\n"
