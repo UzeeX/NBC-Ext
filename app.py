@@ -188,9 +188,9 @@ def extract_province(text: str) -> str:
 def parse_city_filter(city_filter_text: str) -> list[str]:
     """
     Turns:
-    Winnipeg, Brandon, Steinbach
+    Richmond, Vancouver, Surrey
     into:
-    ["winnipeg", "brandon", "steinbach"]
+    ["richmond", "vancouver", "surrey"]
     """
     return [
         c.strip().lower()
@@ -201,8 +201,8 @@ def parse_city_filter(city_filter_text: str) -> list[str]:
 
 def city_matches(haystack: str, selected_cities: list[str]) -> bool:
     """
-    If no city is selected, everything matches.
-    If cities are selected, returns True if any city appears in the location text.
+    If no city is entered, everything matches.
+    If cities are entered, returns True if any city appears in the location text.
     """
     if not selected_cities:
         return True
@@ -562,12 +562,15 @@ with c2:
     selected_province = PROVINCE_OPTIONS[selected_province_label]
 
     city_filter_text = st.text_input(
-        "City filter optional",
-        placeholder="e.g., Winnipeg, Brandon, Toronto, Montreal",
-        help="You can enter multiple cities separated by commas.",
+        "Cities optional - separate multiple cities with commas",
+        placeholder="e.g., Richmond, Vancouver, Surrey, Burnaby",
+        help="Enter multiple cities separated by commas. Example: Richmond, Vancouver, Surrey",
     )
 
     selected_cities = parse_city_filter(city_filter_text)
+
+    if selected_cities:
+        st.caption(f"Searching cities: {', '.join(selected_cities)}")
 
 with c3:
     polite_delay = st.slider("Polite delay seconds", 0.0, 2.5, 0.75, 0.05)
@@ -608,7 +611,7 @@ run = st.button("Run Extraction", use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="small-muted">Tip: Enter multiple cities separated by commas. Example: Winnipeg, Brandon, Steinbach.</div>',
+    '<div class="small-muted">Tip: For multiple cities, use commas. Example: Richmond, Vancouver, Surrey, Burnaby.</div>',
     unsafe_allow_html=True,
 )
 
@@ -696,9 +699,8 @@ if not advisor_urls:
     st.stop()
 
 
-# ----------------------------- Important Fix -----------------------------
-# Pre-filter profile URLs using the directory lookup BEFORE fetching pages.
-# This prevents fetching hundreds of profile pages unnecessarily.
+# ----------------------------- Pre-filter URLs -----------------------------
+# Filters profile URLs using the directory lookup BEFORE fetching pages.
 
 prefiltered_urls = []
 
@@ -851,10 +853,10 @@ with st.expander("Notes / troubleshooting"):
     st.write(
         "- Keep **Deep Crawl OFF** unless you are missing advisor links.\n"
         "- You can enter multiple cities separated by commas.\n"
-        "- Example: Winnipeg, Brandon, Steinbach.\n"
+        "- Example: Richmond, Vancouver, Surrey, Burnaby.\n"
         "- The app filters province/city from `/advisor.html` before opening profile pages.\n"
         "- This avoids trying to fetch all 800+ advisor profiles when you only want a few cities.\n"
-        "- The previous phone parsing crash has been fixed by removing `pd.unique()` from the phone section.\n"
+        "- The phone parsing crash has been fixed by removing `pd.unique()` from the phone section.\n"
         "- If you still see many errors, check the **Error samples** table.\n"
         "- If errors say 403, the site is blocking automated requests.\n"
         "- If errors say timeout, increase the polite delay.\n"
