@@ -397,8 +397,11 @@ def parse_advisor_page(html: str, url: str, base: str, dir_lookup: dict) -> dict
         all_text = soup.get_text("\n", strip=True)
         phones = [normalize_phone(p) for p in PHONE_RE.findall(all_text)]
 
-    phones = [p for p in pd.unique(phones) if p]
-    phone = " | ".join(list(phones)[:3])
+    # IMPORTANT FIX:
+    # Do not use pd.unique() here.
+    # This removes blanks and duplicates while keeping original order.
+    phones = list(dict.fromkeys([p for p in phones if p]))
+    phone = " | ".join(phones[:3])
 
     # Address and province
     address_hint = extract_address_hint(soup)
@@ -823,8 +826,9 @@ st.caption(f"Province blanks: {blank_prov} / {len(df_out)}")
 with st.expander("Notes / troubleshooting"):
     st.write(
         "- Keep **Deep Crawl OFF** unless you are missing advisor links.\n"
-        "- The app now filters province/city from `/advisor.html` before opening profile pages.\n"
+        "- The app filters province/city from `/advisor.html` before opening profile pages.\n"
         "- This avoids trying to fetch all 800+ advisor profiles when you only want one city or province.\n"
+        "- The previous phone parsing crash has been fixed by removing `pd.unique()` from the phone section.\n"
         "- If you still see many errors, check the **Error samples** table.\n"
         "- If errors say 403, the site is blocking automated requests.\n"
         "- If errors say timeout, increase the polite delay.\n"
