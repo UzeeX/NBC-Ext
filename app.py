@@ -1,5 +1,6 @@
 # app.py
-# NBFWM Advisor Directory Extractor (adds Province reliably via directory fallback)
+# NBFWM Advisor Directory Extractor
+# Canada-wide province + city filtering
 # Run: streamlit run app.py
 #
 # requirements.txt:
@@ -54,13 +55,13 @@ hr { margin: 1.4rem 0; }
 )
 
 st.title("NBFWM Wealth Advisor Directory Extractor")
-st.caption("Exports publicly listed advisor info from nbfwm.ca (CSV + optional Excel).")
+st.caption("Exports publicly listed NBFWM advisor info across Canada by province, city, CSV and optional Excel.")
 
 
 # ----------------------------- Constants / Regex -----------------------------
 
 DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; InovestorDirectoryExtractor/1.2; +https://inovestor.com)",
+    "User-Agent": "Mozilla/5.0 (compatible; InovestorDirectoryExtractor/1.3; +https://inovestor.com)",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
@@ -77,34 +78,60 @@ PHONE_RE = re.compile(r"\b(?:1[-\s]?)?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}\b")
 # Canadian provinces/territories abbreviations
 PROV_ABBR_RE = re.compile(r"\b(BC|AB|SK|MB|ON|QC|NB|NS|PE|NL|NT|NU|YT)\b", re.I)
 
-# Full names map (include hyphenated forms used on NBFWM like "British-Columbia")
+# Full names map, including French and hyphenated forms
 FULL_PROV_MAP = {
     "quebec": "QC", "québec": "QC",
     "ontario": "ON",
     "alberta": "AB",
     "manitoba": "MB",
     "saskatchewan": "SK",
+
     "british columbia": "BC", "british-columbia": "BC",
     "colombie britannique": "BC", "colombie-britannique": "BC",
+
     "new brunswick": "NB", "new-brunswick": "NB",
     "nouveau brunswick": "NB", "nouveau-brunswick": "NB",
+
     "nova scotia": "NS", "nova-scotia": "NS",
     "nouvelle ecosse": "NS", "nouvelle-écosse": "NS", "nouvelle-ecosse": "NS",
-    "prince edward island": "PE",
-    "ile du prince edouard": "PE", "île du prince édouard": "PE", "île-du-prince-édouard": "PE",
-    "newfoundland and labrador": "NL",
+
+    "prince edward island": "PE", "prince-edward-island": "PE",
+    "ile du prince edouard": "PE", "île du prince édouard": "PE",
+    "île-du-prince-édouard": "PE",
+
+    "newfoundland and labrador": "NL", "newfoundland": "NL",
     "terre neuve et labrador": "NL", "terre-neuve-et-labrador": "NL",
+
     "northwest territories": "NT",
     "territoires du nord ouest": "NT", "territoires du nord-ouest": "NT",
+
     "nunavut": "NU",
     "yukon": "YT",
 }
 
-# City, ProvinceName lines from /advisor.html (e.g., "Montreal, Quebec", "Vancouver, British-Columbia")
+PROVINCE_OPTIONS = {
+    "All Canada": "",
+    "Alberta": "AB",
+    "British Columbia": "BC",
+    "Manitoba": "MB",
+    "New Brunswick": "NB",
+    "Newfoundland and Labrador": "NL",
+    "Northwest Territories": "NT",
+    "Nova Scotia": "NS",
+    "Nunavut": "NU",
+    "Ontario": "ON",
+    "Prince Edward Island": "PE",
+    "Quebec": "QC",
+    "Saskatchewan": "SK",
+    "Yukon": "YT",
+}
+
+# City, ProvinceName lines from /advisor.html
 PROV_NAME_PATTERN = (
-    r"(Alberta|British[- ]Columbia|Manitoba|New[- ]Brunswick|Nova[- ]Scotia|Ontario|Quebec|Saskatchewan|"
+    r"(Alberta|British[- ]Columbia|Manitoba|New[- ]Brunswick|Nova[- ]Scotia|Ontario|Quebec|Québec|Saskatchewan|"
     r"Prince Edward Island|Newfoundland(?: and Labrador)?|Northwest Territories|Nunavut|Yukon)"
 )
+
 CITY_PROV_LINE_RE = re.compile(rf"^\s*([^,\n]+?)\s*,\s*{PROV_NAME_PATTERN}\s*$", re.I)
 
 POSTAL_RE = re.compile(r"\b[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z]\s?\d[ABCEGHJ-NPRSTV-Z]\d\b", re.I)
@@ -128,29 +155,32 @@ def extract_team_name_from_slug(team_slug: str) -> str:
 
 
 def extract_province(text: str) -> str:
-    """Return province code (QC/ON/...) from any text containing full name or abbreviation."""
+    """Return province code from text containing full province name or abbreviation."""
     if not text:
         return ""
+
     m = PROV_ABBR_RE.search(text)
     if m:
         return m.group(1).upper()
 
     t = text.strip().lower()
-    # normalize hyphens/apostrophes for matching
     t = t.replace("’", "'")
     t_norm = t.replace("-", " ")
 
     for k, v in FULL_PROV_MAP.items():
         if k in t or k in t_norm:
             return v
+
     return ""
 
 
 def safe_get(session: requests.Session, url: str, delay_s: float, timeout: int = 30) -> str:
     r = session.get(url, headers=DEFAULT_HEADERS, timeout=timeout)
     r.raise_for_status()
+
     if delay_s and delay_s > 0:
         time.sleep(delay_s)
+
     return r.text
 
 
@@ -164,6 +194,7 @@ def extract_advisor_urls_from_html(html: str, base: str) -> list[str]:
 
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
+
         if ADVISOR_HREF_RE.match(href):
             links.add(urljoin(base, href))
 
@@ -181,9 +212,12 @@ def extract_internal_html_pages_from_html(html: str, page_url: str, base: str) -
 
     for a in soup.find_all("a", href=True):
         full = urljoin(page_url, a["href"].strip())
+
         if not same_domain(full, base):
             continue
+
         p = urlparse(full).path.lower()
+
         if p.startswith("/advisor/") and p.endswith(".html"):
             found.add(full)
 
@@ -196,23 +230,23 @@ def extract_internal_html_pages_from_html(html: str, page_url: str, base: str) -
 
 def build_directory_location_lookup(directory_html: str, base: str) -> dict:
     """
-    Build a mapping: profile_url -> {"city": ..., "province": ...}
-    from the /advisor.html page content.
+    Build mapping:
+    profile_url -> {"city": ..., "province": ...}
+    from /advisor.html page content.
     """
     soup = BeautifulSoup(directory_html, "html.parser")
     lookup = {}
 
-    # Find all advisor profile links; for each, read nearby text from the card/container.
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
+
         if not ADVISOR_HREF_RE.match(href):
             continue
 
         profile_url = urljoin(base, href)
 
-        # try to locate the card container
         container = a.find_parent(["li", "article", "section", "div"])
-        text = ""
+
         if container:
             text = container.get_text("\n", strip=True)
         else:
@@ -221,43 +255,54 @@ def build_directory_location_lookup(directory_html: str, base: str) -> dict:
         city = ""
         prov_code = ""
 
-        # try to find a line like "Montreal, Quebec"
         for line in [ln.strip() for ln in text.split("\n") if ln.strip()]:
             m = CITY_PROV_LINE_RE.match(line)
+
             if m:
                 city = m.group(1).strip()
                 prov_code = extract_province(line)
                 break
 
         if prov_code:
-            lookup[profile_url] = {"city": city, "province": prov_code}
+            lookup[profile_url] = {
+                "city": city,
+                "province": prov_code,
+            }
 
     return lookup
 
 
 def extract_address_hint(soup: BeautifulSoup) -> str:
     """
-    Best-effort address: locator link text, JSON-LD schema address, or any line with postal/province.
+    Best-effort address:
+    locator link text, JSON-LD schema address, or text line with postal/province.
     """
-    # 1) Locator links (often used for the address line)
+
+    # 1. Locator links
     for a in soup.find_all("a", href=True):
         href = (a["href"] or "").strip().lower()
+
         if "locator" in href:
             txt = a.get_text(" ", strip=True)
+
             if txt:
                 return txt
 
-    # 2) JSON-LD schema.org
+    # 2. JSON-LD schema.org
     for script in soup.find_all("script", type="application/ld+json"):
         raw = script.string or script.get_text(strip=True)
+
         if not raw:
             continue
+
         try:
             data = json.loads(raw)
             items = data if isinstance(data, list) else [data]
+
             for it in items:
                 if isinstance(it, dict) and "address" in it:
                     addr = it.get("address")
+
                     if isinstance(addr, dict):
                         parts = [
                             addr.get("streetAddress", ""),
@@ -265,23 +310,25 @@ def extract_address_hint(soup: BeautifulSoup) -> str:
                             addr.get("addressRegion", ""),
                             addr.get("postalCode", ""),
                         ]
+
                         hint = ", ".join([p for p in parts if p])
+
                         if hint:
                             return hint
+
         except Exception:
-            # not always strict JSON
             pass
 
-    # 3) Any text line with a Canadian postal code
+    # 3. Any line with Canadian postal code
     lines = [ln.strip() for ln in soup.get_text("\n", strip=True).split("\n") if ln.strip()]
+
     for ln in lines:
         if POSTAL_RE.search(ln):
             return ln[:220]
 
-    # 4) Any line containing a recognizable province full name
+    # 4. Any line with province
     for ln in lines:
         if extract_province(ln):
-            # keep short
             return ln[:220]
 
     return ""
@@ -292,51 +339,63 @@ def parse_advisor_page(html: str, url: str, base: str, dir_lookup: dict) -> dict
 
     # Name
     name = ""
+
     h1 = soup.find("h1")
+
     if h1:
         name = h1.get_text(" ", strip=True)
+
     if not name and soup.title:
         name = soup.title.get_text(" ", strip=True).split("|")[0].strip()
 
-    # Email (prefer mailto)
+    # Email
     email = ""
+
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
+
         if href.lower().startswith("mailto:"):
             email = href.split(":", 1)[1].split("?", 1)[0].strip()
             break
+
     if not email:
         all_text = soup.get_text("\n", strip=True)
         emails = sorted(set(EMAIL_RE.findall(all_text)))
         email = emails[0] if emails else ""
 
-    # Phone (prefer tel)
+    # Phone
     phones = []
+
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
+
         if href.lower().startswith("tel:"):
             phones.append(normalize_phone(href.split(":", 1)[1]))
+
     if not phones:
         all_text = soup.get_text("\n", strip=True)
         phones = [normalize_phone(p) for p in PHONE_RE.findall(all_text)]
+
     phones = [p for p in pd.unique(phones) if p]
     phone = " | ".join(list(phones)[:3])
 
-    # Address & province (primary)
+    # Address and province
     address_hint = extract_address_hint(soup)
     province = extract_province(address_hint)
 
-    # Province fallback from directory lookup (very reliable)
+    # Directory fallback
     if not province:
         fallback = dir_lookup.get(url, {})
         province = fallback.get("province", "")
 
     city = ""
+
     if dir_lookup.get(url):
         city = dir_lookup[url].get("city", "")
 
-    # Team slug (fallback team name)
+    # Team slug
     team_name = ""
+
     try:
         parts = urlparse(url).path.strip("/").split("/")
         team_slug = parts[1] if len(parts) > 1 and parts[0].lower() == "advisor" else ""
@@ -358,15 +417,18 @@ def parse_advisor_page(html: str, url: str, base: str, dir_lookup: dict) -> dict
 
 def dedupe_rows(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+
     df["email_norm"] = df["email"].fillna("").str.lower()
     df["name_norm"] = df["name"].fillna("").str.lower()
     df["phone_norm"] = df["phone"].fillna("").str.replace(r"\s+", "", regex=True)
 
     has_email = df["email_norm"] != ""
+
     df_email = df[has_email].drop_duplicates(subset=["email_norm"], keep="first")
     df_no_email = df[~has_email].drop_duplicates(subset=["name_norm", "phone_norm"], keep="first")
 
     out = pd.concat([df_email, df_no_email], ignore_index=True)
+
     return out.drop(columns=["email_norm", "name_norm", "phone_norm"], errors="ignore")
 
 
@@ -388,6 +450,7 @@ def df_to_excel_bytes(df: pd.DataFrame) -> bytes:
     ]
 
     ws.append(list(df.columns))
+
     for c in range(1, ws.max_column + 1):
         cell = ws.cell(row=1, column=c)
         cell.font = header_font
@@ -404,9 +467,11 @@ def df_to_excel_bytes(df: pd.DataFrame) -> bytes:
     for row_i in range(2, ws.max_row + 1):
         if team_col:
             team_val = ws.cell(row=row_i, column=team_col).value
+
             if team_val != current_team:
                 current_team = team_val
                 fill_idx = 1 - fill_idx
+
         for col_i in range(1, ws.max_column + 1):
             cell = ws.cell(row=row_i, column=col_i)
             cell.fill = fills[fill_idx]
@@ -416,13 +481,16 @@ def df_to_excel_bytes(df: pd.DataFrame) -> bytes:
     for col_cells in ws.columns:
         max_len = 0
         col_letter = col_cells[0].column_letter
+
         for cell in col_cells:
             val = "" if cell.value is None else str(cell.value)
             max_len = max(max_len, len(val))
+
         ws.column_dimensions[col_letter].width = min(max(10, max_len + 2), 60)
 
     bio = BytesIO()
     wb.save(bio)
+
     return bio.getvalue()
 
 
@@ -437,39 +505,65 @@ with c1:
     seed_path = st.text_input("Seed path", value=SEED_PATH_DEFAULT)
 
 with c2:
-    qc_only = st.toggle("Québec only (province=QC)", value=False)
-    city_contains = st.text_input("City filter (optional)", placeholder="e.g., Montréal, Quebec, Laval")
+    selected_province_label = st.selectbox(
+        "Province / Territory",
+        options=list(PROVINCE_OPTIONS.keys()),
+        index=0,
+    )
+
+    selected_province = PROVINCE_OPTIONS[selected_province_label]
+
+    city_contains = st.text_input(
+        "City filter optional",
+        placeholder="e.g., Montreal, Toronto, Vancouver, Calgary",
+    )
 
 with c3:
-    polite_delay = st.slider("Polite delay (seconds)", 0.0, 1.5, 0.25, 0.05)
-    max_profiles = st.number_input("Max profiles (0 = no limit)", min_value=0, max_value=50000, value=0, step=100)
+    polite_delay = st.slider("Polite delay seconds", 0.0, 1.5, 0.25, 0.05)
+    max_profiles = st.number_input(
+        "Max profiles 0 = no limit",
+        min_value=0,
+        max_value=50000,
+        value=0,
+        step=100,
+    )
 
 with c4:
     deep_crawl = st.toggle(
-        "Deep crawl advisor pages (find more links)", value=False,
-        help="Usually not needed. /advisor.html already contains the full list."
+        "Deep crawl advisor pages",
+        value=False,
+        help="Usually not needed. /advisor.html already contains the full list.",
     )
-    crawl_page_limit = st.number_input("Crawl page limit", min_value=10, max_value=5000, value=250, step=50, disabled=not deep_crawl)
+
+    crawl_page_limit = st.number_input(
+        "Crawl page limit",
+        min_value=10,
+        max_value=5000,
+        value=250,
+        step=50,
+        disabled=not deep_crawl,
+    )
+
     include_profile_url = st.toggle("Include profile URL column", value=False)
     include_address_hint = st.toggle("Include address hint column", value=False)
     include_city = st.toggle("Include city column", value=True)
-    do_excel = st.toggle("Also generate Excel (.xlsx)", value=False, disabled=not OPENPYXL_OK)
+    do_excel = st.toggle("Also generate Excel .xlsx", value=False, disabled=not OPENPYXL_OK)
 
 debug_show_samples = st.toggle("Debug: show province fill samples", value=False)
 
 run = st.button("Run Extraction", use_container_width=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="small-muted">If province is missing on some profile pages, the app falls back to the directory page location.</div>',
+    '<div class="small-muted">Province is extracted from advisor pages first, then filled from the main directory when possible.</div>',
     unsafe_allow_html=True,
 )
 
 st.divider()
 
 if not run:
-    st.info("Set your options above, then click **Run Extraction**.")
+    st.info("Set your province/city options above, then click **Run Extraction**.")
     st.stop()
 
 
@@ -506,14 +600,17 @@ advisor_urls = set(extract_advisor_urls_from_html(seed_html, base_url))
 # Optional deep crawl
 if deep_crawl:
     status.info("Deep crawling to discover more advisor profile links...")
+
     seen_pages = set()
     q = deque([directory_url])
     internal_pages_checked = 0
 
     while q and internal_pages_checked < int(crawl_page_limit):
         page = q.popleft()
+
         if page in seen_pages:
             continue
+
         seen_pages.add(page)
 
         try:
@@ -544,23 +641,24 @@ if max_profiles and int(max_profiles) > 0:
 total = len(advisor_urls)
 rows = []
 kept = 0
-
 sample_rows = []
 
 for i, url in enumerate(advisor_urls, start=1):
     try:
         status.info(f"Fetching {i}/{total}: {url}")
+
         html = safe_get(session, url, delay_s=polite_delay)
         row = parse_advisor_page(html, url=url, base=base_url, dir_lookup=dir_lookup)
 
-        # Province filter
-        if qc_only and row.get("province", "") != "QC":
+        # Province / territory filter
+        if selected_province and row.get("province", "") != selected_province:
             continue
 
-        # City filter (best-effort: uses directory-derived city + address_hint)
+        # City filter
         if city_contains.strip():
             target = city_contains.strip().lower()
-            hay = f"{row.get('city','')} {row.get('address_hint','')}".lower()
+            hay = f"{row.get('city', '')} {row.get('address_hint', '')}".lower()
+
             if target not in hay:
                 continue
 
@@ -580,6 +678,7 @@ for i, url in enumerate(advisor_urls, start=1):
         errors += 1
 
     progress.progress(int((i / total) * 100))
+
     metrics[1].metric("Processed", f"{i}")
     metrics[2].metric("Kept", f"{kept}")
     metrics[3].metric("Errors", f"{errors}")
@@ -595,18 +694,21 @@ df = dedupe_rows(df)
 
 # Output columns
 out_cols = ["name", "email", "phone", "team_name", "province"]
+
 if include_city:
     out_cols.insert(out_cols.index("province"), "city")
+
 if include_address_hint:
     out_cols.append("address_hint")
+
 if include_profile_url:
     out_cols.append("profile_url")
 
 df_out = df[out_cols].copy()
 
-# Show debug samples
+# Debug samples
 if debug_show_samples:
-    st.subheader("Debug samples (first 10 kept)")
+    st.subheader("Debug samples first 10 kept")
     st.dataframe(pd.DataFrame(sample_rows), use_container_width=True, height=280)
 
 # Preview
@@ -615,6 +717,7 @@ st.dataframe(df_out, use_container_width=True, height=560)
 
 # Download CSV
 csv_bytes = df_out.to_csv(index=False).encode("utf-8")
+
 st.download_button(
     "Download CSV",
     data=csv_bytes,
@@ -627,23 +730,29 @@ st.download_button(
 if do_excel and OPENPYXL_OK:
     try:
         xlsx_bytes = df_to_excel_bytes(df_out)
+
         st.download_button(
-            "Download Excel (.xlsx)",
+            "Download Excel .xlsx",
             data=xlsx_bytes,
             file_name="nbfwm_advisors.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
+
     except Exception as e:
         st.warning(f"Excel export failed: {e}")
 
-# Quick sanity stat
+# Quick sanity stats
 blank_prov = int((df_out["province"].fillna("") == "").sum()) if "province" in df_out.columns else 0
+
 st.caption(f"Province blanks: {blank_prov} / {len(df_out)}")
 
 with st.expander("Notes / troubleshooting"):
     st.write(
+        "- Choose **All Canada** to export everyone.\n"
+        "- Choose a province or territory to filter by location.\n"
+        "- Use the city filter for cities like Toronto, Montreal, Vancouver, Calgary, Winnipeg, Halifax, etc.\n"
         "- Province is extracted from the advisor page address when available.\n"
-        "- If missing there, it falls back to the location shown on /advisor.html (City, Province).\n"
-        "- If you redeployed and still see blanks, reboot the app and clear cache on Streamlit Cloud."
+        "- If missing there, it falls back to the location shown on /advisor.html.\n"
+        "- If you redeployed and still see old filters, reboot the app and clear cache on Streamlit Cloud."
     )
